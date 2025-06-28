@@ -9,7 +9,10 @@ app.secret_key = os.urandom(24)
 app.debug = True
 
 # Configuration
-OWNER_NAME = "𝗟𝗘𝗚𝗘𝗡𝗗 𝗬𝗨𝗩𝗜𝗜 𝗜𝗡𝗦𝗜𝗗𝗘"
+OWNER_NAME = "MR YUVI XD"  # Changed from "𝗟𝗘𝗚𝗘𝗡𝗗 𝗬𝗨𝗩𝗜𝗜 𝗜𝗡𝗦𝗜𝗗𝗘" to "MR YUVI XD"
+FB_APP_ID = 'YOUR_APP_ID'  # Replace with your Facebook App ID
+FB_APP_SECRET = 'YOUR_APP_SECRET'  # Replace with your Facebook App Secret
+REDIRECT_URI = 'http://localhost:5000/fb_callback'  # Update with your actual domain
 
 def cookie_to_token(cookie):
     try:
@@ -82,6 +85,88 @@ def index():
         access_token=access_token,
         profile_info=profile_info,
         error=error
+    )
+
+@app.route('/token_maker')
+def token_maker():
+    return render_template('token_maker.html', owner_name=OWNER_NAME)
+
+@app.route('/fb_login')
+def fb_login():
+    # Generate state token to prevent CSRF
+    state = str(uuid4())
+    session['oauth_state'] = state
+    
+    # Facebook OAuth URL
+    auth_url = (
+        f"https://www.facebook.com/v12.0/dialog/oauth?"
+        f"client_id={FB_APP_ID}"
+        f"&redirect_uri={REDIRECT_URI}"
+        f"&state={state}"
+        f"&scope=public_profile,email,manage_pages,publish_pages"
+        f"&response_type=code"
+    )
+    return redirect(auth_url)
+
+@app.route('/fb_callback')
+def fb_callback():
+    # Verify state matches
+    if request.args.get('state') != session.get('oauth_state'):
+        return "State mismatch error", 400
+    
+    # Get authorization code
+    code = request.args.get('code')
+    if not code:
+        return "Authorization failed", 400
+    
+    # Exchange code for access token
+    token_url = (
+        f"https://graph.facebook.com/v12.0/oauth/access_token?"
+        f"client_id={FB_APP_ID}"
+        f"&redirect_uri={REDIRECT_URI}"
+        f"&client_secret={FB_APP_SECRET}"
+        f"&code={code}"
+    )
+    
+    response = requests.get(token_url)
+    if response.status_code != 200:
+        return "Failed to get access token", 400
+    
+    token_data = response.json()
+    access_token = token_data.get('access_token')
+    if not access_token:
+        return "No access token received", 400
+    
+    # Get long-lived token (optional)
+    long_token_url = (
+        f"https://graph.facebook.com/v12.0/oauth/access_token?"
+        f"grant_type=fb_exchange_token"
+        f"&client_id={FB_APP_ID}"
+        f"&client_secret={FB_APP_SECRET}"
+        f"&fb_exchange_token={access_token}"
+    )
+    
+    long_response = requests.get(long_token_url)
+    if long_response.status_code == 200:
+        long_token_data = long_response.json()
+        long_token = long_token_data.get('access_token')
+        if long_token:
+            access_token = long_token
+    
+    # Get user profile
+    profile_url = f"https://graph.facebook.com/me?fields=id,name,email&access_token={access_token}"
+    profile_response = requests.get(profile_url)
+    
+    if profile_response.status_code != 200:
+        return "Failed to get profile", 400
+    
+    profile_data = profile_response.json()
+    
+    return render_template(
+        'token_result.html',
+        owner_name=OWNER_NAME,
+        access_token=access_token,
+        profile_info=profile_data
     )
 
 if __name__ == '__main__':
