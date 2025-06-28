@@ -1,11 +1,27 @@
-from flask import Flask, request, render_template_string
+from flask import Flask, request, redirect, render_template, session
 import requests
 import os
 
 app = Flask(__name__)
+app.secret_key = os.urandom(24)
 app.debug = True
 
-# Function to get the user's Facebook name using the access token
+# Your Facebook App credentials
+APP_ID = 'YOUR_APP_ID'
+APP_SECRET = 'YOUR_APP_SECRET'
+REDIRECT_URI = 'http://localhost:5000/callback'
+
+def exchange_code_for_token(code):
+    token_url = 'https://graph.facebook.com/v19.0/oauth/access_token'
+    params = {
+        'client_id': APP_ID,
+        'redirect_uri': REDIRECT_URI,
+        'client_secret': APP_SECRET,
+        'code': code
+    }
+    response = requests.get(token_url, params=params)
+    return response.json()
+
 def get_profile_name(access_token):
     url = "https://graph.facebook.com/me"
     params = {'access_token': access_token}
@@ -15,53 +31,41 @@ def get_profile_name(access_token):
         return data['name']
     return None
 
-# Home route with form and results
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/')
 def index():
-    profile_name = None
-    error_message = None
+    profile_name = session.get('profile_name')
+    access_token = session.get('access_token')
+    owner_name = "𝗟𝗘𝗚𝗘𝗡𝗗 𝗬𝗨𝗩𝗜𝗜 𝗜𝗡𝗦𝗜𝗗𝗘"
+    return render_template('index.html', profile_name=profile_name, access_token=access_token, owner_name=owner_name)
 
-    if request.method == 'POST':
-        access_token = request.form.get('access_token')
-        profile_name = get_profile_name(access_token)
-        if profile_name is None:
-            error_message = "Invalid access token. Please try again."
+@app.route('/login')
+def login():
+    facebook_login_url = (
+        f"https://www.facebook.com/v19.0/dialog/oauth"
+        f"?client_id={APP_ID}"
+        f"&redirect_uri={REDIRECT_URI}"
+        f"&scope=email,public_profile"
+    )
+    return redirect(facebook_login_url)
 
-    # Inline HTML template
-    html_template = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>𝗟𝗘𝗚𝗘𝗡𝗗 𝗬𝗨𝗩𝗜𝗜 𝗜𝗡𝗦𝗜𝗗𝗘 | Facebook Token Checker</title>
-        <style>
-            body { font-family: Arial, sans-serif; background-color: #f7f7f7; padding: 30px; }
-            h1 { color: #333; }
-            form { margin-top: 20px; }
-            input[type=text] { padding: 8px; width: 300px; }
-            input[type=submit] { padding: 8px 15px; }
-            .result { margin-top: 20px; font-size: 18px; }
-            .error { color: red; }
-        </style>
-    </head>
-    <body>
-        <h1>𝗟𝗘𝗚𝗘𝗡𝗗 𝗬𝗨𝗩𝗜𝗜 𝗜𝗡𝗦𝗜𝗗𝗘</h1>
-        <p>Enter your Facebook access token to check profile name:</p>
-        <form method="post">
-            <input type="text" name="access_token" placeholder="Enter Access Token" required />
-            <input type="submit" value="Check" />
-        </form>
+@app.route('/callback')
+def callback():
+    code = request.args.get('code')
+    if not code:
+        return "Authorization failed."
 
-        {% if profile_name %}
-            <div class="result">✅ Profile Name: <strong>{{ profile_name }}</strong></div>
-        {% elif error_message %}
-            <div class="result error">❌ {{ error_message }}</div>
-        {% endif %}
-    </body>
-    </html>
-    """
-    return render_template_string(html_template, profile_name=profile_name, error_message=error_message)
+    token_response = exchange_code_for_token(code)
+    access_token = token_response.get('access_token')
 
-# Run the app
+    if not access_token:
+        return "Token exchange failed."
+
+    profile_name = get_profile_name(access_token)
+    session['access_token'] = access_token
+    session['profile_name'] = profile_name
+
+    return redirect('/')
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
